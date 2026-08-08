@@ -3,7 +3,6 @@
 > **La Red de Mensajería Libre en Cuba.**[cite: 1]  
 > Plataforma tecnológica para conectar directamente a clientes con mensajeros independientes sin intermediarios ni comisiones[cite: 1].
 
-![Licencia](https://img.shields.io/badge/Licencia-MIT-blue.svg)
 ![Estado](https://img.shields.io/badge/Estado-APK%20Funcional-success.svg)
 ![Plataforma](https://img.shields.io/badge/Plataforma-Android%20%7C%20Web%20PWA-orange.svg)
 
