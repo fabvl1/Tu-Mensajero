@@ -1,0 +1,93 @@
+name: Build and Release APK
+
+on:
+  repository_dispatch:
+    types: [tu_mensajero_app_updated]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Tu Mensajero APK repo
+        uses: actions/checkout@v4
+
+      - name: Clone tu_mensajero_app repository
+        run: |
+          git clone https://github.com/${{ github.repository_owner }}/tu_mensajero_app.git source_app
+          cd source_app
+          git checkout main || git checkout master
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
+          channel: 'stable'
+
+      - name: Get dependencies
+        run: |
+          cd source_app
+          flutter pub get
+
+      - name: Build APK with obfuscation
+        run: |
+          cd source_app
+          flutter build apk --release --obfuscate --split-debug-info=build/app/outputs/symbols
+
+      - name: Find generated APK
+        id: find_apk
+        run: |
+          cd source_app
+          APK_PATH=$(find build/app/outputs/flutter-apk -name "*.apk" -type f | head -n 1)
+          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
+          echo "Generated APK at: $APK_PATH"
+
+      - name: Get version info
+        id: version
+        run: |
+          cd source_app
+          VERSION_NAME=$(grep "version:" pubspec.yaml | cut -d':' -f2 | tr -d ' ' | cut -d'+' -f1)
+          VERSION_CODE=$(grep "version:" pubspec.yaml | cut -d':' -f2 | tr -d ' ' | cut -d'+' -f2)
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION_NAME ($VERSION_CODE)"
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cd source_app
+          LAST_COMMIT_MSG=$(git log -1 --pretty=%B)
+          LAST_COMMIT_HASH=$(git log -1 --pretty=%h)
+          LAST_COMMIT_DATE=$(git log -1 --pretty=%ci | cut -d' ' -f1,2)
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "## 🚀 Nueva versión: v${{ steps.version.outputs.version_name }} (${{ steps.version.outputs.version_code }})" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "**Fecha:** $LAST_COMMIT_DATE" >> $GITHUB_OUTPUT
+          echo "**Commit:** $LAST_COMMIT_HASH" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### Últimos cambios:" >> $GITHUB_OUTPUT
+          echo "$LAST_COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "### Cambios recientes:" >> $GITHUB_OUTPUT
+          git log -5 --pretty=format:"- %h - %s (%cr)" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Delete existing release if exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete "v${{ steps.version.outputs.version_name }}" --yes || true
+
+      - name: Create Release and Upload APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd source_app
+          gh release create "v${{ steps.version.outputs.version_name }}" \
+            "${{ steps.find_apk.outputs.apk_path }}" \
+            --title "Tu Mensajero v${{ steps.version.outputs.version_name }}" \
+            --notes "${{ steps.release_notes.outputs.notes }}" \
+            --generate-notes \
+            --prerelease=false
