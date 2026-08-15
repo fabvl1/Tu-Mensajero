@@ -13,9 +13,9 @@ jobs:
       - name: Checkout Tu Mensajero APK repo
         uses: actions/checkout@v4
 
-      - name: Clone tu_mensajero_app repository
+      - name: Clone tu_mensajero_app repository with authentication
         run: |
-          git clone https://github.com/${{ github.repository_owner }}/tu_mensajero_app.git source_app
+          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/fabvl1/tu_mensajero_app.git source_app
           cd source_app
           git checkout main || git checkout master
 
@@ -61,7 +61,7 @@ jobs:
           LAST_COMMIT_HASH=$(git log -1 --pretty=%h)
           LAST_COMMIT_DATE=$(git log -1 --pretty=%ci | cut -d' ' -f1,2)
           echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "## 🚀 Nueva versión: v${{ steps.version.outputs.version_name }} (${{ steps.version.outputs.version_code }})" >> $GITHUB_OUTPUT
+          echo "## Nueva versión: v${{ steps.version.outputs.version_name }} (${{ steps.version.outputs.version_code }})" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
           echo "**Fecha:** $LAST_COMMIT_DATE" >> $GITHUB_OUTPUT
           echo "**Commit:** $LAST_COMMIT_HASH" >> $GITHUB_OUTPUT
