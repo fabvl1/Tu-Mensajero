@@ -19,12 +19,6 @@ jobs:
           cd source_app
           git checkout main || git checkout master
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.x'
-          channel: 'stable'
-
       - name: Install Android SDK and accept licenses
         run: |
           sudo apt-get update
@@ -36,7 +30,7 @@ jobs:
           mkdir -p android-sdk/cmdline-tools
           mv cmdline-tools android-sdk/cmdline-tools/latest
           
-          # Set environment variables
+          # Set environment variables for all subsequent steps
           echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
           echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
@@ -49,6 +43,22 @@ jobs:
           
           # Install CMake
           yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "cmake;3.22.1" || true
+          
+          # Install platform tools and build tools
+          yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" || true
+          yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "platforms;android-33" || true
+          yes | $HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager "build-tools;33.0.0" || true
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.x'
+          channel: 'stable'
+
+      - name: Configure Flutter with Android SDK
+        run: |
+          flutter config --android-sdk $ANDROID_HOME
+          flutter doctor -v
 
       - name: Get dependencies
         run: |
