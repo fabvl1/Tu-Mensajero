@@ -28,6 +28,7 @@ jobs:
       - name: Accept Android SDK licenses
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;30.0.14904198" || true
 
       - name: Get dependencies
         run: |
@@ -39,13 +40,9 @@ jobs:
           cd source_app
           flutter build apk --release --obfuscate --split-debug-info=build/app/outputs/symbols
 
-      - name: Find generated APK
-        id: find_apk
+      - name: Copy APK to workspace
         run: |
-          cd source_app
-          APK_PATH=$(find build/app/outputs/flutter-apk -name "*.apk" -type f | head -n 1)
-          echo "apk_path=$APK_PATH" >> $GITHUB_OUTPUT
-          echo "Generated APK at: $APK_PATH"
+          cp source_app/build/app/outputs/flutter-apk/app-release.apk ./app-release.apk
 
       - name: Get version info
         id: version
@@ -88,9 +85,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd source_app
           gh release create "v${{ steps.version.outputs.version_name }}" \
-            "${{ steps.find_apk.outputs.apk_path }}" \
+            ./app-release.apk \
             --title "Tu Mensajero v${{ steps.version.outputs.version_name }}" \
             --notes "${{ steps.release_notes.outputs.notes }}" \
             --generate-notes \
