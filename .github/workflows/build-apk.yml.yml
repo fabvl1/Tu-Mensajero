@@ -77,13 +77,13 @@ jobs:
 
       - name: Delete existing release if exists
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CLONE_TOKEN }}
         run: |
           gh release delete "v${{ steps.version.outputs.version_name }}" --yes || true
 
       - name: Create Release and Upload APK
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.CLONE_TOKEN }}
         run: |
           gh release create "v${{ steps.version.outputs.version_name }}" \
             ./app-release.apk \
