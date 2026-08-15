@@ -15,7 +15,7 @@ jobs:
 
       - name: Clone tu_mensajero_app repository with authentication
         run: |
-          git clone https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/fabvl1/tu_mensajero_app.git source_app
+          git clone https://x-access-token:${{ secrets.CLONE_TOKEN }}@github.com/fabvl1/tu_mensajero_app.git source_app
           cd source_app
           git checkout main || git checkout master
 
