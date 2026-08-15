@@ -13,7 +13,7 @@ jobs:
       - name: Checkout Tu Mensajero APK repo
         uses: actions/checkout@v4
 
-      - name: Clone tu_mensajero_app repository with authentication
+      - name: Clone tu_mensajero_app repository with PAT
         run: |
           git clone https://x-access-token:${{ secrets.CLONE_TOKEN }}@github.com/fabvl1/tu_mensajero_app.git source_app
           cd source_app
@@ -24,6 +24,12 @@ jobs:
         with:
           flutter-version: '3.x'
           channel: 'stable'
+
+      - name: Accept Android SDK licenses
+        run: |
+          yes | sdkmanager --licenses || true
+          yes | sdkmanager "ndk;30.0.14904198" || true
+          yes | sdkmanager "cmake;3.22.1" || true
 
       - name: Get dependencies
         run: |
