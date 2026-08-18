@@ -4,90 +4,167 @@ on:
   repository_dispatch:
     types: [tu_mensajero_app_updated]
   workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Commit, tag or branch from tu_mensajero_app
+        required: false
+        default: main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-release
+  cancel-in-progress: true
 
 jobs:
   build-apk:
     runs-on: ubuntu-latest
+    env:
+      SOURCE_REF: ${{ github.event.client_payload.sha || inputs.source_ref || 'main' }}
 
     steps:
-      - name: Checkout Tu Mensajero APK repo
+      - name: Checkout release repository
         uses: actions/checkout@v4
 
-      - name: Clone tu_mensajero_app repository with PAT
+      - name: Clone application source
+        env:
+          SOURCE_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
         run: |
-          git clone https://x-access-token:${{ secrets.CLONE_TOKEN }}@github.com/fabvl1/tu_mensajero_app.git source_app
-          cd source_app
-          git checkout main || git checkout master
+          CLONE_URL="https://github.com/${{ github.repository_owner }}/tu_mensajero_app.git"
+          if [ -n "$SOURCE_TOKEN" ]; then
+            CLONE_URL="https://x-access-token:${SOURCE_TOKEN}@github.com/${{ github.repository_owner }}/tu_mensajero_app.git"
+          fi
+          git clone "$CLONE_URL" source_app
+          git -C source_app checkout "$SOURCE_REF"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.x'
-          channel: 'stable'
+          flutter-version: 3.x
+          channel: stable
+          cache: true
 
-      - name: Accept Android SDK licenses
+      - name: Accept Android SDK licenses and ensure NDK
         run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;30.0.14904198" || true
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;30.0.14904198" >/dev/null || true
+
+      - name: Configure release signing
+        working-directory: source_app
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/release-keystore.jks
+          {
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyPassword=$ANDROID_KEY_PASSWORD"
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "storeFile=release-keystore.jks"
+          } > android/key.properties
 
       - name: Get dependencies
-        run: |
-          cd source_app
-          flutter pub get
+        working-directory: source_app
+        run: flutter pub get
 
-      - name: Build APK with obfuscation
-        run: |
-          cd source_app
-          flutter build apk --release --obfuscate --split-debug-info=build/app/outputs/symbols
+      - name: Analyze application
+        working-directory: source_app
+        run: flutter analyze
 
-      - name: Copy APK to workspace
+      - name: Build APKs by device architecture
+        working-directory: source_app
+        run: >-
+          flutter build apk
+          --release
+          --split-per-abi
+          --obfuscate
+          --split-debug-info=build/app/outputs/symbols
+
+      - name: Prepare release assets
+        working-directory: source_app
         run: |
-          cp source_app/build/app/outputs/flutter-apk/app-release.apk ./app-release.apk
+          output=build/app/outputs/flutter-apk
+          test -f "$output/app-arm64-v8a-release.apk"
+          test -f "$output/app-armeabi-v7a-release.apk"
+          test -f "$output/app-x86_64-release.apk"
+          mkdir -p ../release-assets
+          cp "$output/app-arm64-v8a-release.apk" ../release-assets/Tu-Mensajero-arm64-v8a.apk
+          cp "$output/app-armeabi-v7a-release.apk" ../release-assets/Tu-Mensajero-armeabi-v7a.apk
+          cp "$output/app-x86_64-release.apk" ../release-assets/Tu-Mensajero-x86_64.apk
+
+      - name: Verify release signatures
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          test -n "$APKSIGNER"
+          for apk in release-assets/*.apk; do
+            "$APKSIGNER" verify --verbose --print-certs "$apk"
+          done
 
       - name: Get version info
         id: version
+        working-directory: source_app
         run: |
-          cd source_app
-          VERSION_NAME=$(grep "version:" pubspec.yaml | cut -d':' -f2 | tr -d ' ' | cut -d'+' -f1)
-          VERSION_CODE=$(grep "version:" pubspec.yaml | cut -d':' -f2 | tr -d ' ' | cut -d'+' -f2)
-          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
-          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION_NAME ($VERSION_CODE)"
+          VERSION=$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml)
+          test -n "$VERSION"
+          echo "name=${VERSION%%+*}" >> "$GITHUB_OUTPUT"
+          echo "code=${VERSION##*+}" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
         id: release_notes
+        working-directory: source_app
         run: |
-          cd source_app
           LAST_COMMIT_MSG=$(git log -1 --pretty=%B)
           LAST_COMMIT_HASH=$(git log -1 --pretty=%h)
-          LAST_COMMIT_DATE=$(git log -1 --pretty=%ci | cut -d' ' -f1,2)
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "## Nueva versión: v${{ steps.version.outputs.version_name }} (${{ steps.version.outputs.version_code }})" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "**Fecha:** $LAST_COMMIT_DATE" >> $GITHUB_OUTPUT
-          echo "**Commit:** $LAST_COMMIT_HASH" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "### Últimos cambios:" >> $GITHUB_OUTPUT
-          echo "$LAST_COMMIT_MSG" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "### Cambios recientes:" >> $GITHUB_OUTPUT
-          git log -5 --pretty=format:"- %h - %s (%cr)" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          LAST_COMMIT_DATE=$(git log -1 --pretty=%cs)
+          DELIM=$(openssl rand -hex 16)
+          {
+            echo "notes<<$DELIM"
+            echo "## Nueva version: v${{ steps.version.outputs.name }} (${{ steps.version.outputs.code }})"
+            echo ""
+            echo "**Fecha:** $LAST_COMMIT_DATE"
+            echo "**Commit:** $LAST_COMMIT_HASH"
+            echo ""
+            echo "### Ultimos cambios"
+            echo "$LAST_COMMIT_MSG"
+            echo ""
+            echo "### Descargas"
+            echo "La web selecciona automaticamente la version compatible con el dispositivo."
+            echo "$DELIM"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Delete existing release if exists
-        env:
-          GH_TOKEN: ${{ secrets.CLONE_TOKEN }}
-        run: |
-          gh release delete "v${{ steps.version.outputs.version_name }}" --yes || true
+      - name: Upload obfuscation symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: symbols-v${{ steps.version.outputs.name }}-${{ steps.version.outputs.code }}
+          path: source_app/build/app/outputs/symbols
+          if-no-files-found: error
+          retention-days: 90
 
-      - name: Create Release and Upload APK
+      - name: Create or update release
         env:
-          GH_TOKEN: ${{ secrets.CLONE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ steps.version.outputs.name }}
+          NOTES: ${{ steps.release_notes.outputs.notes }}
         run: |
-          gh release create "v${{ steps.version.outputs.version_name }}" \
-            ./app-release.apk \
-            --title "Tu Mensajero v${{ steps.version.outputs.version_name }}" \
-            --notes "${{ steps.release_notes.outputs.notes }}" \
-            --generate-notes \
-            --prerelease=false
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/*.apk --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" \
+              --title "Tu Mensajero $TAG" \
+              --notes "$NOTES" \
+              --latest \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" release-assets/*.apk \
+              --title "Tu Mensajero $TAG" \
+              --notes "$NOTES" \
+              --latest \
+              --target "${{ github.event.repository.default_branch }}" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
