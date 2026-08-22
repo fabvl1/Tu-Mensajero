@@ -69,6 +69,17 @@ jobs:
             echo "keyAlias=$ANDROID_KEY_ALIAS"
             echo "storeFile=release-keystore.jks"
           } > android/key.properties
+          test -s android/app/release-keystore.jks
+          keytool -list \
+            -keystore android/app/release-keystore.jks \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" \
+            -v >/dev/null
+
+      - name: Verify Gradle release signing configuration
+        working-directory: source_app/android
+        run: |
+          ./gradlew :app:signingReport
 
       - name: Get dependencies
         working-directory: source_app
@@ -100,11 +111,26 @@ jobs:
           cp "$output/app-x86_64-release.apk" ../release-assets/Tu-Mensajero-x86_64.apk
 
       - name: Verify release signatures
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
+          set -euo pipefail
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
           test -n "$APKSIGNER"
           for apk in release-assets/*.apk; do
+            echo "Verifying $apk"
+            "$APKSIGNER" sign \
+              --ks source_app/android/app/release-keystore.jks \
+              --ks-key-alias "$ANDROID_KEY_ALIAS" \
+              --ks-pass env:ANDROID_KEYSTORE_PASSWORD \
+              --key-pass env:ANDROID_KEY_PASSWORD \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              "$apk"
             "$APKSIGNER" verify --verbose --print-certs "$apk"
+            jarsigner -verify "$apk" >/dev/null
           done
 
       - name: Get version info
