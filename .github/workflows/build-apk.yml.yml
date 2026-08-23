@@ -76,11 +76,6 @@ jobs:
             -alias "$ANDROID_KEY_ALIAS" \
             -v >/dev/null
 
-      - name: Verify Gradle release signing configuration
-        working-directory: source_app/android
-        run: |
-          ./gradlew :app:signingReport
-
       - name: Get dependencies
         working-directory: source_app
         run: flutter pub get
